@@ -2,8 +2,10 @@ module Parser where
 import Base
 import Ast
 
--- Parser for Idris-style syntax.
--- Supports both Haskell (->) and Idris (=>) style arrows.
+-- ============================================
+-- CIC PARSER: Idris/Lean-style syntax
+-- Supports: inductive families, universe levels, implicit args
+-- ============================================
 
 data Pos = Pos Int Int deriving (Eq, Show)
 incCol (Pos l c) = Pos l (c+1)
@@ -52,11 +54,12 @@ parens p = between (char '(') (char ')') p
 braces p = between (char '{') (char '}') p
 brackets p = between (char '[') (char ']') p
 
+-- Identifiers
 ident = lexeme $ do
   c <- satisfy (\c -> isAlpha c || c == '_')
   cs <- many (satisfy (\c -> isAlphaNum c || c == '_' || c == '\''))
   let name = c:cs
-  if elem name ["data", "where", "let", "in", "case", "of", "if", "then", "else", "do", "module", "import", "interface", "implementation", "record", "infix", "infixl", "infixr", "total", "partial", "Type", "using", "namespace", "mutual", "parameters", "public", "private", "export", "covering", "impossible", "with", "proof", "rewrite", "auto", "default", "ifx", "postfix"]
+  if elem name ["data", "where", "let", "in", "case", "of", "if", "then", "else", "do", "module", "import", "axiom", "inductive", "using", "namespace", "mutual", "parameters", "public", "private", "export", "impossible", "with", "rewrite", "auto", "default", "Sort", "Prop", "Type"]
     then empty
     else pure name
 
@@ -71,36 +74,61 @@ sepBy1 p sep = (:) <$> p <*> many (sep *> p)
 endBy p sep = many (p <* sep)
 endBy1 p sep = some (p <* sep)
 
--- Term parsing.
+-- ============================================
+-- TERM PARSING
+-- ============================================
 parseTerm = parseExpr
 
 parseExpr = parsePiSigma <|> parseLambda <|> parseLet <|> parseIf <|> parseCase <|> parseDo <|> parseApp
 
+-- Parse Pi type: (x : A) -> B or {x : A} -> B (implicit)
 parsePiSigma = do
-  token "("
+  (implicit, b) <- parseBinderIntro
+  case b of
+    Just (name, ty) -> do
+      (token "->" <|> token "=>")
+      body <- parseTerm
+      pure $ if implicit
+        then Pi (BImplicit (Raw name) ty) body
+        else Pi (BExplicit (Raw name) ty) body
+    Nothing -> empty
+
+parseBinderIntro = do
+  -- try implicit {x : A}
+  implicit <- (token "{" *> pure True) <|> (token "(" *> pure False)
   v <- ident
   token ":"
   ty <- parseTerm
-  (token "->" <|> token "=>")
-  body <- parseTerm
-  token ")"
-  pure $ Pi (Raw v) ty body
+  (if implicit then token "}" else token ")")
+  pure (implicit, Just (v, ty))
+  <|> pure (False, Nothing)
 
 parseLambda = do
   token "\\"
-  vars <- some ident
-  (token "->" <|> token "=>")
-  body <- parseTerm
-  pure $ foldr (\v t -> Lam (Raw v) t) body vars
+  (implicit, binderInfo) <- parseBinderIntro
+  case binderInfo of
+    Just (v, ty) -> do
+      (token "->" <|> token "=>")
+      body <- parseTerm
+      pure $ if implicit
+        then Lam (BImplicit (Raw v) ty) body
+        else Lam (BExplicit (Raw v) ty) body
+    Nothing -> do
+      vars <- some ident
+      (token "->" <|> token "=>")
+      body <- parseTerm
+      pure $ foldr (\v t -> Lam (BExplicit (Raw v) (Hole "_")) t) body vars
 
 parseLet = do
   keyword "let"
   v <- ident
+  token ":"
+  ty <- parseTerm
   token "="
   val <- parseTerm
   keyword "in"
   body <- parseTerm
-  pure $ Let (Raw v) val body
+  pure $ Let (Raw v) ty val body
 
 parseIf = do
   keyword "if"
@@ -109,7 +137,7 @@ parseIf = do
   t <- parseTerm
   keyword "else"
   e <- parseTerm
-  pure $ Case cond [(PCon "True" [], t), (PCon "False" [], e)]
+  pure $ Case cond [(Clause (PCon "True" []) t), (Clause (PCon "False" []) e)]
 
 parseCase = do
   keyword "case"
@@ -124,7 +152,7 @@ parseAlt = do
   pat <- parsePattern
   token "=>"
   rhs <- parseTerm
-  pure (pat, rhs)
+  pure (Clause pat rhs)
 
 parsePattern = parsePCon <|> parsePLit <|> parsePVar
 parsePVar = PVar . Raw <$> ident
@@ -152,14 +180,14 @@ parseStmt = do
 
 desugarDo [] = Var (Raw "return")
 desugarDo [Right e] = e
-desugarDo (Left (v, m) : rest) = App (App (Var (Raw ">>=")) m) (Lam (Raw v) (desugarDo rest))
-desugarDo (Right e : rest) = App (App (Var (Raw ">>") e) (desugarDo rest))
+desugarDo (Left (v, m) : rest) = App (App (Var (Raw ">>=")) m) (Lam (BExplicit (Raw v) (Hole "_")) (desugarDo rest))
+desugarDo (Right e : rest) = App (App (Var (Raw ">>")) e) (desugarDo rest)
 
 parseApp = do
   atoms <- some parseAtom
   pure $ foldl1 App atoms
 
-parseAtom = parseVar <|> parseNatLit <|> parseCharLit <|> parseStringLit <|> parseParen <|> parseType <|> parseRefl <|> parsePair <|> parseProj
+parseAtom = parseVar <|> parseNatLit <|> parseCharLit <|> parseStringLit <|> parseParen <|> parseSort <|> parseRefl <|> parsePair <|> parseProj
 
 parseVar = Var . Raw <$> ident
 parseNatLit = NatLit <$> lexeme (readNat <$> some (satisfy isDigit))
@@ -175,11 +203,30 @@ parseStringLit = do
   token "\""
   cs <- many (satisfy (\c -> c /= '"'))
   token "\""
-  pure $ foldr (\c t -> App (App (Var (Global "Cons")) (CharLit (ord c))) t) (Var (Global "Nil")) cs
+  pure $ StringLit cs
 
 parseParen = parens parseTerm
-parseType = keyword "Type" *> (token (string (show i)) *> pure (Type i) <|> pure (Type 0))
+
+-- Sort parsing: Prop, Type, Type u, Sort u
+parseSort = parseProp <|> parseType <|> parseSortKw
+
+parseProp = keyword "Prop" *> pure (Sort SProp)
+
+parseType = do
+  keyword "Type"
+  (token (string (show i)) *> pure (Sort (SType (NatLit i))) <|> pure (Sort (SType LZero)))
+  -- Simplified: just parse "Type" as Type 0
+  where i = 0
+
+parseSortKw = keyword "Sort" *> (Sort . SType <$> parseLevel)
+
+parseLevel = parseLZero <|> parseLSucc <|> parseLMax
+parseLZero = token "0" *> pure LZero
+parseLSucc = token "succ" *> (LSucc <$> parseLevel)
+parseLMax = token "max" *> (LMax <$> parseLevel <*> parseLevel)
+
 parseRefl = keyword "Refl" *> (Refl <$> parseTerm <|> pure (Refl (Var (Raw "_"))))
+
 parsePair = parens $ do
   a <- parseTerm
   token ","
@@ -189,22 +236,66 @@ parsePair = parens $ do
 parseProj = do
   tok <- keyword "fst" <|> keyword "snd"
   e <- parseAtom
-  pure $ case tok of "fst" -> Proj1 e; _ -> Proj2 e
+  pure $ case tok of "fst" -> Proj 1 e; _ -> Proj 2 e
 
--- Declaration parsing.
-parseDecl = parseDataDecl <|> parseTypeSig <|> parseFunDef <|> parseFixityDecl
+-- ============================================
+-- DECLARATION PARSING
+-- ============================================
+parseDecl = parseIndDecl <|> parseTypeSig <|> parseFunDef <|> parseAxiomDecl <|> parseFixityDecl
 
-parseDataDecl = do
+-- Inductive family: data D (a : Type) : Type -> Type where | C1 : ... | C2 : ...
+parseIndDecl = do
   keyword "data"
   name <- ident
-  token "="
-  cs <- sepBy1 parseCon (token "|")
-  pure $ DataDecl name cs
+  params <- many parseParam
+  token ":"
+  targetSort <- parseSort
+  keyword "where"
+  token "{"
+  constrs <- sepBy1 parseConstrDecl (token "|")
+  token "}"
+  let indices = extractIndices params targetSort
+  let indDef = IndDef
+    { indName = name
+    , indParams = take (length params - length indices) params
+    , indIndices = indices
+    , indSort = case targetSort of Sort s -> s; _ -> SType LZero
+    , indConstrs = constrs
+    }
+  pure $ IndDecl indDef
 
-parseCon = do
+parseParam = do
+  token "("
+  v <- ident
+  token ":"
+  ty <- parseTerm
+  token ")"
+  pure $ BExplicit (Raw v) ty
+  <|> do
+  token "{"
+  v <- ident
+  token ":"
+  ty <- parseTerm
+  token "}"
+  pure $ BImplicit (Raw v) ty
+
+parseConstrDecl = do
   c <- ident
-  ts <- many parseAtom
-  pure (c, ts)
+  token ":"
+  ty <- parseTerm
+  -- parse constructor type: parameters already applied, rest are args + result indices
+  let (args, result) = splitConstrType ty
+  pure $ ConstrDef
+    { conName = c
+    , conArgs = args
+    , conResult = result
+    }
+
+splitConstrType :: Term -> ([Binder], [Term])
+splitConstrType ty = ([], [])  -- TODO: proper splitting
+
+extractIndices :: [Binder] -> Term -> [Binder]
+extractIndices params target = []  -- TODO: extract indices from target type
 
 parseTypeSig = do
   name <- ident
@@ -222,6 +313,13 @@ parseClause = do
   token "="
   rhs <- parseTerm
   pure $ Clause ps rhs
+
+parseAxiomDecl = do
+  keyword "axiom"
+  name <- ident
+  token ":"
+  ty <- parseTerm
+  pure $ AxiomDecl name ty
 
 parseFixityDecl = do
   f <- (keyword "infix" *> pure Infix) <|> (keyword "infixl" *> pure InfixL) <|> (keyword "infixr" *> pure InfixR)
