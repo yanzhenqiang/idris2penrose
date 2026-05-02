@@ -1,0 +1,130 @@
+------------------------------------------------------------------------
+-- Uppercase letters. Strings. Chars.
+-- Bracket abstraction optimization.
+------------------------------------------------------------------------
+
+or f g x y = f x (g x y);
+and f g x y = @C f y (g x y);
+pair x y f = f x y;
+just x f g = g x;
+foldr = @Y \r c n l -> l n (\h t -> c h(r c n t));
+lsteq = @Y \r xs ys a b -> xs (ys a (\u u -> b)) (\x xt -> ys b (\y yt -> x(y @=) (r xt yt a b) b));
+
+pure x inp = just (pair x inp);
+bind f m = m @K (\x -> x f);
+ap x y = \inp -> bind (\a t -> bind (\b u -> pure (a b) u) (y t)) (x inp);
+fmap f x = ap (pure f) x;
+alt x y = \inp -> (x inp) (y inp) just;
+liftaa f x y = ap (fmap f x) y;
+many = @Y \r p -> alt (liftaa @: p (r p)) (pure @K);
+some p = liftaa @: p (many p);
+liftki = liftaa (@K @I);
+liftk = liftaa @K;
+between x y p = liftki x (liftk p y);
+sat f inp = inp @K (\h t -> f h (pure h t) @K);
+char c = sat (\x -> x(c @=));
+
+lcr s   = \a b c d -> a s;
+lcv v   = \a b c d -> b v;
+lca x y = \a b c d -> c x y;
+lcl x y = \a b c d -> d x y;
+raw x = lcr (@: x);
+
+com = liftki (char #-) (liftk (char #-) (many (sat (\c -> @C (c(#
+@=))))));
+sp = many (alt (char # ) (alt (char #
+) com));
+spc f = liftk f sp;
+spch = @B spc char;
+var = spc (some (sat (\x -> or
+  (and (#z(x @L)) (x(#a @L)))
+  (and (#Z(x @L)) (x(#A @L)))
+  )));
+pre = liftki (char #@) (fmap (@:) (spc (sat (@K @K))));
+lam r = liftki (spch #\) (liftaa (@C (foldr lcl)) (some var) (liftki (char #-) (liftki (spch #>) r)));
+listify = fmap (foldr (\h t -> lca (lca (raw #:) h) t) (raw #K));
+escchar = liftki (char #\) (alt (sat (\c -> or (c(#" @=)) (or (c(#\ @=)) (c(#' @=))))) (fmap (@K #
+) (char #n)));
+litone delim = fmap (\x -> lcr (@B (@: ##) (@: x))) (alt escchar (sat (\c -> @C (delim(c @=)))));
+litstr = listify (between (char #") (spch #") (many (litone #")));
+litchar = between (char #') (spch #') (litone #');
+lit = alt litstr litchar;
+atom r = alt (fmap lcv var) (alt (between (spch #() (spch #)) r) (alt (fmap lcr pre) (alt (lam r) lit)));
+
+apps = @Y \f r -> alt (liftaa @T (atom r) (fmap (\vs v x -> vs (lca x v)) (f r))) (pure @I);
+expr = @Y \r -> liftaa @T (atom r) (apps r);
+def = liftaa pair var (liftaa (@C (foldr lcl)) (many var) (liftki (spch #=) expr));
+program = liftki sp (some (liftk def (spch #;)));
+
+ze   = \    a b c d e -> a;
+su   = \x   a b c d e -> b x;
+pass = \x   a b c d e -> c x;
+la   = \x   a b c d e -> d x;
+app  = \x y a b c d e -> e x y;
+
+debruijn = @Y \r n e -> e
+  (\s -> pass (lcr s))
+  (\v -> foldr (\h m -> lsteq h v ze (su m)) (pass (lcv v)) n)
+  (\x y -> app (r n x) (r n y))
+  (\s t -> la (r (@: s n) t))
+  ;
+
+defer = \a b c d -> a;
+closed = \t a b c d -> b t;
+need = \x a b c d -> c x;
+weak = \x a b c d -> d x;
+
+ldef = \r y -> y
+  (need (closed (lca (lca (raw #S) (raw #I)) (raw #I))))
+  (\d -> need (closed (lca (raw #T) d)))
+  (\e -> need (r (closed (lca (raw #S) (raw #I))) e))
+  (\e -> need (r (closed (raw #T)) e))
+  ;
+
+lclo = \r d y -> y
+  (need (closed d))
+  (\dd -> closed (lca d dd))
+  (\e -> need (r (closed (lca (raw #B) d)) e))
+  (\e -> weak (r (closed d) e))
+  ;
+
+lnee = \r e y -> y
+  (need (r (r (closed (raw #S)) e) (closed (raw #I))))
+  (\d -> need (r (closed (lca (raw #R) d)) e))
+  (\ee -> need (r (r (closed (raw #S)) e) ee))
+  (\ee -> need (r (r (closed (raw #C)) e) ee))
+  ;
+
+lwea = \r e y -> y
+  (need e)
+  (\d -> weak (r e (closed d)))
+  (\ee -> need (r (r (closed (raw #B)) e) ee))
+  (\ee -> weak (r e ee))
+  ;
+
+babsa = @Y \r x y -> x
+  (ldef r y)
+  (\d -> lclo r d y)
+  (\e -> lnee r e y)
+  (\e -> lwea r e y)
+  ;
+
+babs = @Y \r t -> t
+  defer
+  (@B weak r)
+  closed
+  (\t -> r t
+    (closed (raw #I))
+    (\d -> closed (lca (raw #K) d))
+    @I
+    (babsa (closed (raw #K))))
+  (\x y -> babsa (r x) (r y))
+  ;
+
+nolam x = babs (debruijn @K x) @? @I @? @?;
+
+-- Code generator.
+rank ds v = foldr (\d t -> lsteq v (d @K) (\n -> @B (@:#@) (@:n)) (@B t \n -> #0(#1 @-)(n @+))) @? ds # ;
+shows f = @Y \r t -> t @I f (\x y -> @B (@B (@:#`) (r x)) (r y)) @?;
+dump tab = foldr (\h t -> shows (rank tab) (nolam (h (@K @I))) (@:#;t)) @K tab;
+main s = program s (@:#?@K) (@B dump (@T @K));

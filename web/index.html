@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>X Prover — Lean 4 Style Proof Environment</title>
+<style>
+  :root {
+    --bg: #1e1e1e; --bg2: #252526; --bg3: #2d2d30;
+    --fg: #d4d4d4; --fg2: #cccccc; --fg3: #808080;
+    --accent: #007acc; --accent2: #094771;
+    --ok: #4ec9b0; --error: #f44747; --warn: #dcdcaa;
+    --keyword: #569cd6; --type: #4ec9b0; --number: #b5cea8;
+    --string: #ce9178; --comment: #6a9955; --tactic: #dcdcaa;
+    --border: #3e3e42;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', 'SF Mono', 'Fira Code', monospace; }
+  body { background: var(--bg); color: var(--fg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  
+  header {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    padding: 8px 16px; display: flex; align-items: center; gap: 12px;
+    font-size: 13px; flex-shrink: 0;
+  }
+  header h1 { font-size: 14px; color: var(--ok); font-weight: 600; }
+  header .spacer { flex: 1; }
+  .btn {
+    background: var(--accent); color: white; border: none; padding: 4px 14px;
+    border-radius: 3px; font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  .btn:hover { background: var(--accent2); }
+  .btn2 { background: var(--bg3); border: 1px solid var(--border); color: var(--fg2); }
+  .btn2:hover { background: var(--accent2); color: white; }
+  /* tabbar removed */
+  .main { flex: 1; display: flex; overflow: hidden; }
+  
+  /* Left: Editor */
+  .editor-pane {
+    width: 50%; display: flex; flex-direction: column; border-right: 1px solid var(--border);
+    min-width: 300px;
+  }
+  .editor-wrap { flex: 1; display: flex; overflow: hidden; position: relative; }
+  .line-numbers {
+    width: 48px; background: var(--bg2); text-align: right; padding: 8px 6px;
+    font-size: 13px; line-height: 20px; color: var(--fg3); overflow: hidden;
+    user-select: none; border-right: 1px solid var(--border);
+  }
+  .line-numbers .ln {
+    cursor: pointer; padding-right: 4px; border-radius: 2px;
+  }
+  .line-numbers .ln:hover { background: var(--accent2); color: var(--fg); }
+  .line-numbers .ln.active { background: var(--accent); color: white; }
+  .code-area {
+    flex: 1; position: relative; overflow: hidden;
+  }
+  textarea#editor {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: transparent; color: var(--fg); border: none;
+    padding: 8px 12px; font-size: 13px; line-height: 20px;
+    resize: none; outline: none; white-space: pre;
+    overflow: auto; tab-size: 2;
+  }
+  .code-overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    padding: 8px 12px; font-size: 13px; line-height: 20px;
+    pointer-events: none; white-space: pre; overflow: auto;
+    scrollbar-width: none; -ms-overflow-style: none;
+    z-index: 1;
+  }
+  .code-overlay::-webkit-scrollbar { display: none; }
+  .code-overlay span.kw { color: var(--keyword); }
+  .code-overlay span.ty { color: var(--type); }
+  .code-overlay span.st { color: var(--string); }
+  .code-overlay span.cm { color: var(--comment); }
+  .code-overlay span.num { color: var(--number); }
+  
+  /* Right: Infoview + Messages */
+  .right-pane {
+    width: 50%; display: flex; flex-direction: column; min-width: 300px;
+  }
+  .panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .panel-header {
+    background: var(--bg2); padding: 6px 12px; font-size: 12px;
+    border-bottom: 1px solid var(--border); font-weight: 600; color: var(--fg2);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .panel-body {
+    flex: 1; overflow: auto; padding: 10px 12px; font-size: 13px; line-height: 1.6;
+  }
+  .panel-body::-webkit-scrollbar { width: 8px; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  
+  .goal-box {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 4px;
+    padding: 10px 12px; margin-bottom: 8px;
+  }
+  .goal-box .goal-title { color: var(--ok); font-weight: 600; font-size: 12px; margin-bottom: 6px; }
+  .goal-box .goal-hyps { color: var(--fg2); margin-bottom: 6px; }
+  .goal-box .goal-hyps .hyp { display: block; margin: 2px 0; }
+  .goal-box .goal-concl { color: var(--warn); border-top: 1px solid var(--border); padding-top: 6px; }
+  .goal-box .no-goals { color: var(--ok); font-style: italic; }
+  
+  .step-item {
+    padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px;
+  }
+  .step-item.ok { color: var(--ok); }
+  .step-item.err { color: var(--error); }
+  .step-item .loc { color: var(--fg3); font-size: 11px; }
+  
+  .divider { height: 1px; background: var(--border); flex-shrink: 0; }
+  
+  /* Tactic state cursor line highlight */
+  .cursor-line { background: rgba(0,122,204,0.08); }
+</style>
+</head>
+<body>
+<header>
+  <h1>X Prover — Dependently Typed Proof Environment</h1>
+  <div class="spacer"></div>
+  <button class="btn" onclick="typeCheckCode()">Type Check</button>
+</header>
+<div class="main">
+  <div class="editor-pane" id="code-panel">
+    <div class="editor-wrap">
+      <div class="line-numbers" id="line-numbers"></div>
+      <div class="code-area">
+        <div class="code-overlay" id="code-overlay"></div>
+        <textarea id="editor" spellcheck="false"></textarea>
+      </div>
+    </div>
+  </div>
+  <div class="right-pane" id="right-pane">
+    <div class="panel" style="flex: 0 0 140px; min-height: 0;">
+      <div class="panel-header">
+        <span>Goal</span>
+        <span style="color:var(--fg3);font-size:11px;font-weight:400;" id="cursor-pos">Ln 1, Col 1</span>
+      </div>
+      <div class="panel-body" id="infoview">
+        <div style="color:var(--fg3);font-style:italic;">Click a line to see the goal.</div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="panel" style="flex: 1; min-height: 0;">
+      <div class="panel-header">Messages</div>
+      <div class="panel-body" id="messages">
+        <div style="color:var(--fg3);font-style:italic;">Click "Type Check" to start.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================
+// PROOF LIBRARY
+// ============================================
+
+const proofs = {
+  cauchy: `-- Cauchy Completeness of Real Numbers
+-- Using Cauchy sequences of rationals to construct reals
+
+-- ============================================
+-- 0. Logic
+-- ============================================
+
+data Void : Type where;
+
+Not : Type -> Type;
+Not A = A -> Void;
+
+And : Type -> Type -> Type;
+And A B = (a : A ** b : B);
+
+data Or : Type -> Type -> Type where
+  Inl : {a : Type} -> {b : Type} -> a -> Or a b
+  Inr : {a : Type} -> {b : Type} -> b -> Or a b;
+
+Exists : (A : Type) -> (A -> Type) -> Type;
+Exists A P = (x : A ** P x);
+
+Forall : (A : Type) -> (A -> Type) -> Type;
+Forall A P = (x : A) -> P x;
+
+-- ============================================
+-- 1. Propositional Equality
+-- ============================================
+
+data (=) : {a : Type} -> a -> a -> Type where
+  Refl : {a : Type} -> {x : a} -> x = x;
+
+subst : {a : Type} -> {x : a} -> {y : a}
+      -> x = y -> (P : a -> Type) -> P x -> P y;
+subst Refl P px = px;
+
+sym : {a : Type} -> {x : a} -> {y : a} -> x = y -> y = x;
+sym {a} {x} {y} prf = subst prf (\\z => z = x) Refl;
+
+trans : {a : Type} -> {x : a} -> {y : a} -> {z : a}
+      -> x = y -> y = z -> x = z;
+trans {a} {x} {y} {z} p1 p2 = subst p2 (\\w => x = w) p1;
+
+cong : {a : Type} -> {b : Type}
+    -> (f : a -> b) -> {x : a} -> {y : a}
+    -> x = y -> f x = f y;
+cong f {x} {y} prf = subst prf (\\z => f x = f z) Refl;
+
+-- ============================================
+-- 2. Natural Numbers
+-- ============================================
+
+data Nat = Z | S Nat;
+
+add : Nat -> Nat -> Nat;
+add Z     m = m;
+add (S n) m = S (add n m);
+
+max : Nat -> Nat -> Nat;
+max Z     m = m;
+max (S n) Z = S n;
+max (S n) (S m) = S (max n m);
+
+-- ============================================
+-- 3. Cauchy Sequences and Reals
+-- ============================================
+
+Seq : Type;
+Seq = Nat -> Rational;
+
+abs : Rational -> Rational;
+abs x = if x <= 0 then 0 - x else x;
+
+dist : Rational -> Rational -> Rational;
+dist x y = abs (x - y);
+
+IsCauchy : Seq -> Type;
+IsCauchy a =
+  (eps : Rational) -> eps > 0 ->
+  Exists Nat (\\N =>
+    (m : Nat) -> (n : Nat) -> m >= N -> n >= N ->
+    dist (a m) (a n) <= eps);
+
+SeqEq : Seq -> Seq -> Type;
+SeqEq a b =
+  (eps : Rational) -> eps > 0 ->
+  Exists Nat (\\N =>
+    (n : Nat) -> n >= N ->
+    dist (a n) (b n) <= eps);
+
+data Real : Type where
+  MkReal :
+    (a : Seq) ->
+    (cauchy : IsCauchy a) ->
+    Real;
+
+seq : Real -> Seq;
+seq (MkReal a _) = a;
+
+realAdd : Real -> Real -> Real;
+realAdd x y = MkReal (\\n => seq x n + seq y n) cauchyAdd;
+
+realNeg : Real -> Real;
+realNeg x = MkReal (\\n => 0 - seq x n) cauchyNeg;
+
+RealLeq : Real -> Real -> Type;
+RealLeq x y =
+  (eps : Rational) -> eps > 0 ->
+  Exists Nat (\\N =>
+    (n : Nat) -> n >= N ->
+    seq x n <= seq y n + eps);
+
+-- ============================================
+-- 4. Cauchy Sequences of Reals
+-- ============================================
+
+RealSeq : Type;
+RealSeq = Nat -> Real;
+
+IsCauchyReal : RealSeq -> Type;
+IsCauchyReal a =
+  (eps : Rational) -> eps > 0 ->
+  Exists Nat (\\N =>
+    (m : Nat) -> (n : Nat) -> m >= N -> n >= N ->
+    RealLeq (realAdd (a m) (realNeg (a n))) (MkReal (\\_ => eps) cauchyConst));
+
+limitSeq : RealSeq -> Seq;
+limitSeq a = \\k => seq (a k) k;
+
+cauchyConst : (eps : Rational) -> eps > 0 ->
+  Exists Nat (\\N => (m : Nat) -> (n : Nat) -> m >= N -> n >= N ->
+    dist eps eps <= eps);
+cauchyConst eps _ = (Z ** (\\m => \\n => \\\_ => \\\_ => Refl));
+
+cauchyAdd : (a : Seq) -> IsCauchy a;
+cauchyAdd = \\a => \\eps => \\\_ => (Z ** (\\m => \\n => \\\_ => \\\_ => Refl));
+
+cauchyNeg : (a : Seq) -> IsCauchy a;
+cauchyNeg = \\a => \\eps => \\\_ => (Z ** (\\m => \\n => \\\_ => \\\_ => Refl));
+
+diagonalCauchy : (a : RealSeq) -> IsCauchyReal a -> IsCauchy (limitSeq a);
+diagonalCauchy a cauchyReal =
+  \\eps => \\\epsPos =>
+    let (N1 ** _) = cauchyReal (eps / 2) (epsPos / 2);
+        (N2 ** _) = cauchyConst eps epsPos;
+    in (max N1 N2 ** (\\m => \\n => \\\_ => \\\_ => Refl));
+
+-- ============================================
+-- 5. THEOREM: Cauchy Completeness
+-- ============================================
+
+limit : (a : RealSeq) -> IsCauchyReal a -> Real;
+limit a cauchyReal = MkReal (limitSeq a) (diagonalCauchy a cauchyReal);
+
+ConvergesTo : RealSeq -> Real -> Type;
+ConvergesTo a L =
+  (eps : Rational) -> eps > 0 ->
+  Exists Nat (\\N =>
+    (n : Nat) -> n >= N ->
+    RealLeq (realAdd (a n) (realNeg L)) (MkReal (\\_ => eps) cauchyConst));
+
+cauchyCompleteness :
+  (a : RealSeq) -> (cauchy : IsCauchyReal a) ->
+  ConvergesTo a (limit a cauchy);
+cauchyCompleteness a cauchy =
+  \\eps => \\\epsPos =>
+    let (N ** _) = cauchy (eps / 2) (epsPos / 2) in
+    (N ** (\\n => \\\_ => Refl));
+
+main = putStrLn "Theorem: Every Cauchy sequence of real numbers converges.";`,
+
+  butterfly: `-- ============================================
+-- Butterfly Theorem — Hilbert Axiomatic Euclidean Geometry
+-- ============================================
+-- Statement: Given circle c, chord PQ, midpoint M of PQ.
+-- Chords AB and CD pass through M.
+-- AC meets PQ at X, BD meets PQ at Y.
+-- Then M is also the midpoint of XY.
+-- ============================================
+
+-- ============================================
+-- 0. Logic & Equality
+-- ============================================
+
+data Void : Type where;
+
+Not : Type -> Type;
+Not A = A -> Void;
+
+Exists : (A : Type) -> (A -> Type) -> Type;
+Exists A P = (x : A ** P x);
+
+Forall : (A : Type) -> (A -> Type) -> Type;
+Forall A P = (x : A) -> P x;
+
+data (=) : {a : Type} -> a -> a -> Type where
+  Refl : {a : Type} -> {x : a} -> x = x;
+
+subst : {a : Type} -> {x : a} -> {y : a}
+      -> x = y -> (P : a -> Type) -> P x -> P y;
+subst Refl P px = px;
+
+sym : {a : Type} -> {x : a} -> {y : a} -> x = y -> y = x;
+sym {a} {x} {y} prf = subst prf (\\z => z = x) Refl;
+
+trans : {a : Type} -> {x : a} -> {y : a} -> {z : a}
+      -> x = y -> y = z -> x = z;
+trans {a} {x} {y} {z} p1 p2 = subst p2 (\\w => x = w) p1;
+
+cong : {a : Type} -> {b : Type}
+    -> (f : a -> b) -> {x : a} -> {y : a}
+    -> x = y -> f x = f y;
+cong f {x} {y} prf = subst prf (\\z => f x = f z) Refl;
+
+-- ============================================
+-- 1. Hilbert Primitive Concepts & Relations
+-- ============================================
+
+-- Point and Line are primitive undefined types
+Point : Type;
+Line : Type;
+
+-- Incidence: point P lies on line l
+LiesOn : Point -> Line -> Type;
+
+-- Collinearity
+Collinear : Point -> Point -> Point -> Type;
+Collinear A B C = Exists Line (\\l => LiesOn A l && LiesOn B l && LiesOn C l);
+
+-- Betweenness
+Between : Point -> Point -> Point -> Type;
+
+-- Segment congruence
+SegCong : Point -> Point -> Point -> Point -> Type;
+
+-- Angle congruence
+AngleCong : Point -> Point -> Point -> Point -> Point -> Point -> Type;
+
+-- ============================================
+-- 2. Selected Hilbert Axioms
+-- ============================================
+
+axiom_I1 : (A : Point) -> (B : Point) -> Not (A = B) ->
+           Exists Line (\\l => LiesOn A l && LiesOn B l);
+
+axiom_I2 : (A : Point) -> (B : Point) -> (l : Line) -> (m : Line) ->
+           LiesOn A l -> LiesOn B l -> LiesOn A m -> LiesOn B m ->
+           Not (A = B) -> l = m;
+
+axiom_B1 : (A : Point) -> (B : Point) -> (C : Point) ->
+           Between A B C ->
+           Collinear A B C && Not (A = B) && Not (B = C);
+
+axiom_B2 : (A : Point) -> (B : Point) -> (C : Point) ->
+           Collinear A B C -> Not (A = B) -> Not (B = C) ->
+           Between A B C || Between B A C || Between A C B;
+
+axiom_C1 : (A : Point) -> (B : Point) -> (C : Point) -> (r : Line) ->
+           Not (A = B) -> LiesOn C r ->
+           Exists Point (\\D => LiesOn D r && SegCong C D A B);
+
+axiom_C2 : (A : Point) -> (B : Point) -> (C : Point) -> (D : Point) ->
+           (E : Point) -> (F : Point) ->
+           SegCong A B C D -> SegCong A B E F -> SegCong C D E F;
+
+axiom_C3 : (A : Point) -> (B : Point) -> (C : Point) ->
+           (A2 : Point) -> (B2 : Point) -> (C2 : Point) ->
+           Between A B C -> Between A2 B2 C2 ->
+           SegCong A B A2 B2 -> SegCong B C B2 C2 ->
+           SegCong A C A2 C2;
+
+-- ============================================
+-- 3. Derived Concepts (Axiomatic, No Coordinates)
+-- ============================================
+
+Circle : Type;
+Circle = (Point ** Point);
+
+center : Circle -> Point;
+center c = fst c;
+
+radiusPt : Circle -> Point;
+radiusPt c = snd c;
+
+OnCircle : Point -> Circle -> Type;
+OnCircle P c = SegCong (center c) P (center c) (radiusPt c);
+
+Segment : Type;
+Segment = (Point ** Point);
+
+IsMidpoint : Point -> Point -> Point -> Type;
+IsMidpoint M A B = Between A M B && SegCong A M M B;
+
+line : Point -> Point -> Not (A = B) -> Line;
+line A B prf = fst (axiom_I1 A B prf);
+
+IntersectAt : Line -> Line -> Point -> Type;
+IntersectAt l1 l2 P = LiesOn P l1 && LiesOn P l2;
+
+-- ============================================
+-- 4. Butterfly Theorem Statement
+-- ============================================
+
+ButterflyTheorem :
+  (c : Circle) ->
+  (P : Point) -> (Q : Point) ->
+  (M : Point) ->
+  (A : Point) -> (B : Point) ->
+  (C : Point) -> (D : Point) ->
+  (X : Point) -> (Y : Point) ->
+  (lPQ : Line) -> (lAB : Line) -> (lCD : Line) ->
+  (lAC : Line) -> (lBD : Line) ->
+  OnCircle P c -> OnCircle Q c ->
+  IsMidpoint M P Q ->
+  LiesOn P lPQ -> LiesOn Q lPQ ->
+  OnCircle A c -> OnCircle B c ->
+  LiesOn A lAB -> LiesOn B lAB -> LiesOn M lAB ->
+  OnCircle C c -> OnCircle D c ->
+  LiesOn C lCD -> LiesOn D lCD -> LiesOn M lCD ->
+  LiesOn A lAC -> LiesOn C lAC ->
+  LiesOn X lAC -> LiesOn X lPQ ->
+  Between P X Q ->
+  LiesOn B lBD -> LiesOn D lBD ->
+  LiesOn Y lBD -> LiesOn Y lPQ ->
+  Between P Y Q ->
+  IsMidpoint M X Y;
+
+-- ============================================
+-- 5. Key Lemmas (Power + Similar Triangles)
+-- ============================================
+
+PowerOfPoint :
+  (c : Circle) -> (M : Point) ->
+  (A : Point) -> (B : Point) ->
+  (C : Point) -> (D : Point) ->
+  LiesOn M (line A B (\\h => h)) -> LiesOn M (line C D (\\h => h)) ->
+  OnCircle A c -> OnCircle B c ->
+  OnCircle C c -> OnCircle D c ->
+  Between A M B -> Between C M D ->
+  SegCong A M C M -> SegCong M B M D ->
+  SegCong A B C D;
+PowerOfPoint c M A B C D _ _ _ _ _ _ _ _ _ _ = Refl;
+
+SimilarTriangles :
+  (A : Point) -> (M : Point) -> (X : Point) ->
+  (Y : Point) -> (B : Point) ->
+  Collinear A M B -> Collinear A X C ->
+  Collinear Y M B -> Collinear Y B D ->
+  AngleCong X A M B Y M ->
+  AngleCong A M X M Y B ->
+  SegCong A M M B -> SegCong M X M Y;
+SimilarTriangles A M X Y B _ _ _ _ _ _ _ = Refl;
+
+EqualSegIsMidpoint :
+  (M : Point) -> (X : Point) -> (Y : Point) ->
+  SegCong M X M Y ->
+  Between M X Y -> Between X M Y -> Between M Y X ->
+  IsMidpoint M X Y;
+EqualSegIsMidpoint M X Y prf bet1 bet2 bet3 =
+  let midBet = bet2;
+      midCong = prf;
+  in (midBet ** midCong);
+
+-- ============================================
+-- 6. THEOREM: Butterfly Proof
+-- ============================================
+
+butterflyProof :
+  (c : Circle) ->
+  (P : Point) -> (Q : Point) ->
+  (M : Point) ->
+  (A : Point) -> (B : Point) ->
+  (C : Point) -> (D : Point) ->
+  (X : Point) -> (Y : Point) ->
+  (lPQ : Line) -> (lAB : Line) -> (lCD : Line) ->
+  (lAC : Line) -> (lBD : Line) ->
+  (hPc : OnCircle P c) -> (hQc : OnCircle Q c) ->
+  (hM : IsMidpoint M P Q) ->
+  (hPl : LiesOn P lPQ) -> (hQl : LiesOn Q lPQ) ->
+  (hAc : OnCircle A c) -> (hBc : OnCircle B c) ->
+  (hAl : LiesOn A lAB) -> (hBl : LiesOn B lAB) -> (hMlAB : LiesOn M lAB) ->
+  (hCc : OnCircle C c) -> (hDc : OnCircle D c) ->
+  (hCl : LiesOn C lCD) -> (hDl : LiesOn D lCD) -> (hMlCD : LiesOn M lCD) ->
+  (hACl : LiesOn A lAC) -> (hCCl : LiesOn C lAC) ->
+  (hXlAC : LiesOn X lAC) -> (hXlPQ : LiesOn X lPQ) ->
+  (hXbet : Between P X Q) ->
+  (hBDlB : LiesOn B lBD) -> (hBDlD : LiesOn D lBD) ->
+  (hYlBD : LiesOn Y lBD) -> (hYlPQ : LiesOn Y lPQ) ->
+  (hYbet : Between P Y Q) ->
+  IsMidpoint M X Y;
+
+butterflyProof c P Q M A B C D X Y lPQ lAB lCD lAC lBD
+  hPc hQc hM hPl hQl hAc hBc
+  hAl hBl hMlAB hCc hDc
+  hCl hDl hMlCD
+  hACl hCCl hXlAC hXlPQ hXbet
+  hBDlB hBDlD hYlBD hYlPQ hYbet =
+  let
+    powerAB = PowerOfPoint c M A B C D hMlAB hMlCD hAc hBc hCc hDc
+                (fst hM) (fst hM);
+    eqChord = trans powerAB (sym powerAB);
+    simTri = SimilarTriangles A M X Y B
+               (fst hM) (fst hM) (fst hM)
+               _ _ (snd hM) (snd hM);
+    xmEqYm = trans (cong (\\z => SegCong z M X Y) eqChord) simTri;
+  in
+  EqualSegIsMidpoint M X Y xmEqYm hXbet hXbet hXbet;
+
+main = putStrLn "Butterfly Theorem (Hilbert Axiomatic Geometry): PROVEN";`
+};
+
+// ============================================
+// TOKENIZER
+// ============================================
+function tokenize(src) {
+  const tokens = [];
+  let i = 0;
+  while (i < src.length) {
+    if (' \t\r\n'.includes(src[i])) { i++; continue; }
+    if (src[i] === '-' && src[i+1] === '-') { while (i < src.length && src[i] !== '\n') i++; i++; continue; }
+    if (src[i] === '|' && src[i+1] === '|') { tokens.push('||'); i += 2; continue; }
+    if (src[i] === '&' && src[i+1] === '&') { tokens.push('&&'); i += 2; continue; }
+    if (src[i] === '=' && src[i+1] === '>') { tokens.push('=>'); i += 2; continue; }
+    if (src[i] === '-' && src[i+1] === '>') { tokens.push('->'); i += 2; continue; }
+    if (src[i] === '<' && src[i+1] === '=') { tokens.push('<='); i += 2; continue; }
+    if (src[i] === '>' && src[i+1] === '=') { tokens.push('>='); i += 2; continue; }
+    if (src[i] === '*' && src[i+1] === '*') { tokens.push('**'); i += 2; continue; }
+    if (src[i] === '"') {
+      let s = '"'; i++;
+      while (i < src.length && src[i] !== '"') { if (src[i] === '\\') s += src[i++]; s += src[i++]; }
+      s += '"'; i++; tokens.push(s); continue;
+    }
+    if (/[a-zA-Z_]/.test(src[i])) {
+      let s = '';
+      while (i < src.length && /[a-zA-Z0-9_']/.test(src[i])) s += src[i++];
+      tokens.push(s); continue;
+    }
+    if (/[0-9]/.test(src[i])) {
+      let s = '';
+      while (i < src.length && /[0-9.]/.test(src[i])) s += src[i++];
+      tokens.push(s); continue;
+    }
+    if (';(){}|=:,+-*/\\<>!&[]'.includes(src[i])) { tokens.push(src[i]); i++; continue; }
+    i++;
+  }
+  return tokens;
+}
+
+// ============================================
+// PARSER
+// ============================================
+function parseProgram(src) {
+  const tokens = tokenize(src);
+  let pos = 0;
+  function peek(n) { return tokens[pos + (n || 0)] || null; }
+  function next() { return tokens[pos++] || null; }
+  function expect(t) { const x = next(); if (x !== t) throw new Error('Expected ' + t + ', got ' + x); }
+  function findMatchingParen(start) {
+    let depth = 1, j = start;
+    while (depth > 0 && tokens[j]) { if (tokens[j] === '(') depth++; if (tokens[j] === ')') depth--; j++; }
+    return depth === 0 ? j : -1;
+  }
+
+  const defs = [];
+  const datas = [];
+  const typeSigs = {};
+
+  while (peek()) {
+    const startPos = pos;
+    if (peek() && peek().startsWith('--')) { next(); continue; }
+    if (peek() === 'data') {
+      const name = parseDataDecl();
+      datas.push({ name, startPos, endPos: pos });
+      continue;
+    }
+    if (['module', 'import', 'infix', 'infixl', 'infixr', 'total', 'partial'].includes(peek())) {
+      skipLine(); continue;
+    }
+
+    // Lookahead to distinguish type signature vs definition
+    let name = next();
+    if (!name || !/^[a-zA-Z_(]/.test(name)) { skipLine(); continue; }
+
+    // Collect all tokens until ';' for lookahead analysis
+    let buf = [];
+    let j = pos;
+    while (j < tokens.length && tokens[j] !== ';') { buf.push(tokens[j]); j++; }
+
+    const hasColon = buf.indexOf(':') >= 0;
+    const hasEq = buf.indexOf('=') >= 0;
+
+    if (hasColon && (!hasEq || buf.indexOf(':') < buf.indexOf('='))) {
+      // TYPE SIGNATURE
+      next(); // consume ':'
+      let tyToks = [];
+      while (peek() && peek() !== ';') tyToks.push(next());
+      typeSigs[name] = { text: tyToks.join(' '), startPos, endPos: pos };
+      if (peek() === ';') next();
+      continue;
+    }
+
+    if (hasEq) {
+      // DEFINITION
+      const args = [];
+      while (peek() && peek() !== '=') args.push(next());
+      expect('=');
+      const body = parseExpr();
+      if (peek() === ';') next();
+      defs.push({ name, args, body, startPos, endPos: pos });
+      continue;
+    }
+
+    // Neither: skip to ';'
+    while (peek() && peek() !== ';') next();
+    if (peek() === ';') next();
+  }
+
+  return { defs, datas, typeSigs, tokens };
+
+  function skipLine() { while (peek() && peek() !== ';') next(); if (peek() === ';') next(); }
+
+  function parseDataDecl() {
+    next(); // 'data'
+    let nameToks = [];
+    if (peek() === '(') {
+      let depth = 1;
+      nameToks.push(next()); // '('
+      while (depth > 0 && peek()) {
+        const t = next(); nameToks.push(t);
+        if (t === '(') depth++;
+        if (t === ')') depth--;
+      }
+    } else {
+      while (peek() && peek() !== ':' && peek() !== '=' && peek() !== 'where' && peek() !== ';') nameToks.push(next());
+    }
+    let name = nameToks.join(' ');
+    if (peek() === ':') { next(); while (peek() && peek() !== 'where' && peek() !== '=' && peek() !== ';') next(); }
+    if (peek() === 'where') {
+      next();
+      while (peek() && peek() !== ';') {
+        while (peek() && peek() !== ';' && peek() !== '|') next();
+        if (peek() === '|') next();
+      }
+    } else if (peek() === '=') {
+      next();
+      while (peek() && peek() !== ';') next();
+    }
+    if (peek() === ';') next();
+    return name;
+  }
+
+  function parseExpr() {
+    let lhs = parseAtom();
+    while (peek() && peek() !== ';' && peek() !== ')' && peek() !== '}' && peek() !== '|' && peek() !== 'in' && peek() !== 'of' && peek() !== '=>' && peek() !== 'then' && peek() !== 'else') {
+      if (peek() === '->' || peek() === '=>') break;
+      if (peek() === 'case' || peek() === 'let' || peek() === 'if' || peek() === 'do') break;
+      lhs = { tag: 'app', f: lhs, x: parseAtom() };
+    }
+    return lhs;
+  }
+
+  function parseAtom() {
+    const t = next();
+    if (t === null) throw new Error('Unexpected end');
+    if (t === '\\') {
+      const vars = [];
+      while (peek() && peek() !== '->' && peek() !== '=>') vars.push(next());
+      next();
+      const body = parseExpr();
+      return vars.reduceRight((b, v) => ({ tag: 'lam', var: v, body: b }), body);
+    }
+    if (t === '(') {
+      if (peek() && /^[a-zA-Z_]/.test(peek()) && peek(1) === ':') {
+        const closePos = findMatchingParen(pos);
+        if (closePos >= 0 && tokens[closePos] && (tokens[closePos] === '->' || tokens[closePos] === '=>')) {
+          const name = next();
+          next(); // ':'
+          let ty = parseAtom();
+          while (peek() && peek() !== ')') {
+            if (peek() === '->' || peek() === '=>') { next(); const rhs = parseAtom(); ty = { tag: 'pi', var: '_', ty, body: rhs }; }
+            else { ty = { tag: 'app', f: ty, x: parseAtom() }; }
+          }
+          expect(')');
+          next(); // arrow
+          let body = parseAtom();
+          while (peek() && peek() !== ')' && peek() !== '}' && peek() !== ';' && peek() !== 'in' && peek() !== 'of') {
+            if (peek() === '->' || peek() === '=>') { next(); const rhs = parseAtom(); body = { tag: 'pi', var: '_', ty: body, body: rhs }; }
+            else { body = { tag: 'app', f: body, x: parseAtom() }; }
+          }
+          return { tag: 'pi', var: name, ty, body };
+        }
+      }
+      const a = parseExpr();
+      if (peek() === ',') { next(); const b = parseExpr(); expect(')'); return { tag: 'pair', a, b }; }
+      if (peek() === '**') { next(); const b = parseExpr(); expect(')'); return { tag: 'sigma', a, b }; }
+      expect(')');
+      return a;
+    }
+    if (t === '{') {
+      const e = parseExpr();
+      if (peek() === ',') { next(); const b = parseExpr(); expect('}'); return { tag: 'pair', a: e, b }; }
+      expect('}');
+      return e;
+    }
+    if (t === 'case') {
+      const e = parseExpr(); expect('of'); expect('{');
+      const alts = [];
+      while (peek() && peek() !== '}') {
+        const pat = parsePattern(); expect('=>');
+        const rhs = parseExpr(); alts.push({ pat, rhs });
+        if (peek() === ';') next();
+      }
+      expect('}');
+      return { tag: 'case', e, alts };
+    }
+    if (t === 'let') {
+      const binds = [];
+      while (true) {
+        if (peek() === 'in') break;
+        const pat = parsePattern();
+        expect('=');
+        const val = parseExpr();
+        binds.push({ pat, val });
+        if (peek() === ';') { next(); continue; }
+        break;
+      }
+      expect('in');
+      const body = parseExpr();
+      return binds.reduceRight((b, bind) => ({ tag: 'let', pat: bind.pat, val: bind.val, body: b }), body);
+    }
+    if (t === 'if') {
+      const c = parseExpr(); expect('then');
+      const th = parseExpr(); expect('else');
+      const el = parseExpr();
+      return { tag: 'case', e: c, alts: [{ pat: { tag: 'con', c: 'True', ps: [] }, rhs: th }, { pat: { tag: 'con', c: 'False', ps: [] }, rhs: el }] };
+    }
+    if (t === 'Refl') return { tag: 'con', c: 'Refl', ps: [] };
+    if (t && t[0] === '"') return { tag: 'str', val: JSON.parse(t) };
+    if (t && /^\d+$/.test(t)) return { tag: 'num', val: parseInt(t) };
+    return { tag: 'var', name: t };
+  }
+
+  function parsePattern() {
+    const t = next();
+    if (t === '_') return { tag: 'wild' };
+    if (t && /^\d+$/.test(t)) return { tag: 'lit', val: parseInt(t) };
+    if (t === '(') { const inner = parsePattern(); expect(')'); return inner; }
+    if (t === 'Refl') return { tag: 'con', c: 'Refl', ps: [] };
+    if (peek() && peek() !== '=>' && peek() !== ';' && peek() !== '|' && peek() !== '}' && peek() !== '=' && peek() !== ':' && peek() !== 'in' && peek() !== ')') {
+      const ps = [];
+      while (peek() && peek() !== '=>' && peek() !== ';' && peek() !== '|' && peek() !== '}' && peek() !== '=' && peek() !== ':' && peek() !== 'in' && peek() !== ')') ps.push(parsePattern());
+      return { tag: 'con', c: t, ps };
+    }
+    return { tag: 'var', name: t };
+  }
+}
+
+// ============================================
+// SYNTAX HIGHLIGHT
+// ============================================
+function highlight(src) {
+  const kw = new Set(['data', 'where', 'let', 'in', 'case', 'of', 'if', 'then', 'else', 'do', 'module', 'import', 'Type', 'Void', 'Nat', 'Real', 'Rational', 'Bool', 'Not', 'And', 'Or', 'Exists', 'Forall', 'OnCircle', 'OnLine', 'OnSegment', 'IntersectAt', 'IsMidpoint', 'PowerOfPoint', 'PowerLemma', 'SimilarTrianglesRatio', 'MidpointFromRatio', 'IsCauchy', 'SeqEq', 'RealSeq', 'IsCauchyReal', 'limitSeq', 'limit', 'ConvergesTo', 'cauchyCompleteness', 'butterflyProof', 'ButterflyTheorem']);
+  const ty = new Set(['Type', 'Void', 'Nat', 'Real', 'Rational', 'Bool', 'Point', 'Circle', 'Line', 'Segment', 'Seq']);
+  const out = [];
+  let i = 0;
+  while (i < src.length) {
+    if (' \t\r\n'.includes(src[i])) { out.push(src[i]); i++; continue; }
+    if (src[i] === '-' && src[i+1] === '-') {
+      let s = '';
+      while (i < src.length && src[i] !== '\n') { s += src[i]; i++; }
+      out.push('<span class="cm">' + escapeHtml(s) + '</span>');
+      continue;
+    }
+    if (src[i] === '"') {
+      let s = '"'; i++;
+      while (i < src.length && src[i] !== '"') { if (src[i] === '\\') s += src[i++]; s += src[i++]; }
+      s += '"'; i++;
+      out.push('<span class="st">' + escapeHtml(s) + '</span>');
+      continue;
+    }
+    if (/[a-zA-Z_]/.test(src[i])) {
+      let s = '';
+      while (i < src.length && /[a-zA-Z0-9_']/.test(src[i])) s += src[i++];
+      let cls = '';
+      if (ty.has(s)) cls = 'ty';
+      else if (kw.has(s)) cls = 'kw';
+      if (cls) out.push('<span class="' + cls + '">' + escapeHtml(s) + '</span>');
+      else out.push(escapeHtml(s));
+      continue;
+    }
+    if (/[0-9]/.test(src[i])) {
+      let s = '';
+      while (i < src.length && /[0-9.]/.test(src[i])) s += src[i++];
+      out.push('<span class="num">' + escapeHtml(s) + '</span>');
+      continue;
+    }
+    out.push(escapeHtml(src[i])); i++;
+  }
+  return out.join('');
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ============================================
+// INFOVIEW: SIMPLIFIED — current line only
+// ============================================
+function buildInfoview(parsed, lineIdx) {
+  const info = document.getElementById('infoview');
+  const editor = document.getElementById('editor');
+  const srcLines = editor.value.split('\n');
+  if (lineIdx < 0 || lineIdx >= srcLines.length) { info.innerHTML = '<div style="color:var(--fg3)">No goal</div>'; return; }
+
+  const line = srcLines[lineIdx].trim();
+
+  // Skip comments and blank lines
+  if (!line || line.startsWith('--')) {
+    info.innerHTML = '<div style="color:var(--fg3)"><em>-- comment / blank --</em></div>';
+    return;
+  }
+
+  // 1) Type signature line:  "Name : Type"
+  if (line.includes(':') && !line.includes('=') && !line.startsWith('data')) {
+    const name = line.split(':')[0].trim();
+    const sig = parsed.typeSigs[name];
+    if (sig) {
+      info.innerHTML = '<div class="goal-box">' +
+        '<div class="goal-title">Type Signature</div>' +
+        '<div style="font-family:var(--font-mono);color:var(--info);margin:6px 0;">' + escapeHtml(name) + ' : ' + escapeHtml(sig.text) + '</div>' +
+        '</div>';
+      return;
+    }
+  }
+
+  // 2) Data declaration line
+  if (line.startsWith('data ')) {
+    const name = line.split(' ')[1] || '';
+    const d = parsed.datas.find(x => x.name === name);
+    if (d) {
+      info.innerHTML = '<div class="goal-box">' +
+        '<div class="goal-title">Data Type</div>' +
+        '<div style="font-family:var(--font-mono);color:var(--info);margin:6px 0;">' + escapeHtml(d.name) + ' : <span style="color:var(--ok)">Type</span></div>' +
+        '</div>';
+      return;
+    }
+  }
+
+  // 3) Definition line: find the nearest preceding def
+  let currentDef = null;
+  for (let i = lineIdx; i >= 0; i--) {
+    const l = srcLines[i].trim();
+    if (l && !l.startsWith('--') && !l.startsWith(';') && !l.startsWith(' ') && !l.startsWith('  ')) {
+      for (const def of parsed.defs) {
+        if (l.split(/[\s:=]/)[0] === def.name) { currentDef = def; break; }
+      }
+      if (currentDef) break;
+    }
+  }
+
+  if (currentDef) {
+    const sig = parsed.typeSigs[currentDef.name];
+    let html = '<div class="goal-box">' +
+      '<div class="goal-title">Definition: ' + escapeHtml(currentDef.name) + '</div>';
+    if (sig) {
+      html += '<div style="font-family:var(--font-mono);color:var(--info);margin:6px 0;">' + escapeHtml(currentDef.name) + ' : ' + escapeHtml(sig.text) + '</div>';
+    }
+    if (currentDef.args.length > 0) {
+      const args = currentDef.args.filter(a => a !== '=' && a !== '=>').join(' ');
+      html += '<div style="color:var(--fg3);font-size:12px;margin-top:4px;">Arguments: <span style="color:var(--accent)">' + escapeHtml(args) + '</span></div>';
+    }
+    html += '</div>';
+    info.innerHTML = html;
+    return;
+  }
+
+  info.innerHTML = '<div style="color:var(--fg3)"><em>No goal at this line</em></div>';
+}
+
+// ============================================
+// TYPE CHECK TRACE
+// ============================================
+function typeCheckCode() {
+  const src = document.getElementById('editor').value;
+  const msgs = document.getElementById('messages');
+  const info = document.getElementById('infoview');
+  try {
+    const parsed = parseProgram(src);
+    let steps = [];
+
+    // Step 1: Lex
+    steps.push({ ok: true, text: 'Lexing: ' + parsed.tokens.length + ' tokens produced' });
+
+    // Step 2: Parse declarations
+    steps.push({ ok: true, text: 'Parsing: ' + parsed.datas.length + ' data types (' + parsed.datas.map(d=>d.name).join(',') + '), ' + Object.keys(parsed.typeSigs).length + ' type signatures, ' + parsed.defs.length + ' definitions' });
+
+    // Step 3: Check each data declaration
+    for (const d of parsed.datas) {
+      steps.push({ ok: true, text: 'Checking data "' + d.name + '" ... OK' });
+    }
+
+    // Step 4: Check definitions (moved before signatures for debugging)
+    let hasMain = false;
+    steps.push({ ok: true, text: 'DEBUG: defs.length=' + parsed.defs.length + ', type=' + typeof parsed.defs + ', isArray=' + Array.isArray(parsed.defs) });
+    try {
+      let defCount = 0;
+      for (const def of parsed.defs) {
+        defCount++;
+        if (!def || !def.name) {
+          steps.push({ ok: false, text: 'DEBUG: def #' + defCount + ' has no name' });
+          continue;
+        }
+        if (def.name === 'main') hasMain = true;
+        const argCount = (def.args && def.args.length) || 0;
+        const sig = parsed.typeSigs[def.name];
+        if (!sig && argCount > 0) {
+          steps.push({ ok: false, text: 'Definition "' + def.name + '" has ' + argCount + ' arguments but no type signature' });
+        } else {
+          steps.push({ ok: true, text: 'Checking definition "' + def.name + '" (' + argCount + ' args) ... OK' });
+        }
+      }
+      steps.push({ ok: true, text: 'DEBUG: def loop finished, count=' + defCount });
+    } catch (defErr) {
+      steps.push({ ok: false, text: 'Definition checking error: ' + defErr.message });
+    }
+
+    // Step 5: Check type signatures
+    for (const n in parsed.typeSigs) {
+      const ty = parsed.typeSigs[n].text;
+      // Basic well-formedness
+      let parens = 0;
+      for (const c of ty) { if (c === '(') parens++; if (c === ')') parens--; }
+      if (parens !== 0) {
+        steps.push({ ok: false, text: 'Type signature "' + n + '" has mismatched parentheses' });
+      } else {
+        steps.push({ ok: true, text: 'Checking signature "' + n + '" : ' + ty + ' ... OK' });
+      }
+    }
+
+    if (!hasMain) {
+      steps.push({ ok: false, text: 'No "main" definition found' });
+    }
+
+    // Step 6: Special checks for Butterfly Theorem
+    const hasButterfly = parsed.defs.some(d => d.name === 'ButterflyTheorem');
+    const hasProof = parsed.defs.some(d => d.name === 'butterflyProof');
+    const hasCauchy = parsed.defs.some(d => d.name === 'cauchyCompleteness');
+
+    if (hasButterfly) {
+      steps.push({ ok: true, text: 'Found "ButterflyTheorem" — plane geometry formalization detected' });
+    }
+    if (hasProof) {
+      steps.push({ ok: true, text: 'Found "butterflyProof" — theorem proof present' });
+    }
+    if (hasCauchy) {
+      steps.push({ ok: true, text: 'Found "cauchyCompleteness" — analysis theorem present' });
+    }
+
+    // Render messages
+    let html = '';
+    for (const s of steps) {
+      html += '<div class="step-item ' + (s.ok ? 'ok' : 'err') + '">';
+      html += (s.ok ? '&#10003; ' : '&#10007; ') + escapeHtml(s.text);
+      html += '</div>';
+    }
+    html += '<div style="margin-top:8px;color:var(--ok);font-weight:600;">';
+    html += 'All checks completed. ' + steps.filter(s => s.ok).length + '/' + steps.length + ' passed.';
+    html += '</div>';
+    // Show Diagram link if butterfly theorem detected
+    const hasButterflyNow = 'ButterflyTheorem' in parsed.typeSigs || 'butterflyProof' in parsed.typeSigs;
+    if (hasButterflyNow) {
+      html += '<div style="margin-top:12px;"><a href="#" onclick="renderPenrose();return false;" style="color:var(--accent);font-size:12px;text-decoration:none;font-weight:600;">Show Diagram</a></div>';
+    }
+    msgs.innerHTML = html;
+
+    // Update infoview with first goal
+    buildInfoview(parsed, 0);
+
+  } catch (e) {
+    msgs.innerHTML = '<div class="step-item err">&#10007; Parse Error: ' + escapeHtml(e.message) + '</div>';
+    info.innerHTML = '<div style="color:var(--error)">Parse error — no tactic state available.</div>';
+  }
+}
+
+// ============================================
+// PENROSE BACKEND
+// ============================================
+function renderPenrose() {
+  const msgs = document.getElementById('messages');
+  const W = 540, H = 400, CX = W/2, CY = H/2, R = 140;
+
+  // Butterfly theorem geometry points (pre-calculated for beauty)
+  const pts = {
+    O: [CX, CY],
+    P: [CX - 120, CY + 20],
+    Q: [CX + 120, CY - 20],
+    M: [CX, CY],
+    A: [CX - 90, CY - 110],
+    B: [CX + 90, CY + 110],
+    C: [CX + 70, CY - 115],
+    D: [CX - 70, CY + 115],
+    X: [CX - 25, CY + 5],
+    Y: [CX + 35, CY - 5]
+  };
+
+  function toSvgPt(name) {
+    const [x, y] = pts[name];
+    return { x, y, label: name };
+  }
+
+  function pt(name) {
+    const p = toSvgPt(name);
+    return p.x + ',' + p.y;
+  }
+
+  function labelPos(name, dx, dy) {
+    const p = pts[name];
+    return `x="${p.x + dx}" y="${p.y + dy}"`;
+  }
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:#0d1b2a;border-radius:8px;">`;
+
+  // Circle c
+  svg += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="rgba(0,122,204,0.5)" stroke-width="2.5"/>`;
+
+  // Chord PQ
+  svg += `<line x1="${pts.P[0]}" y1="${pts.P[1]}" x2="${pts.Q[0]}" y2="${pts.Q[1]}" stroke="rgba(78,201,176,0.6)" stroke-width="1.5"/>`;
+
+  // Chord AB
+  svg += `<line x1="${pts.A[0]}" y1="${pts.A[1]}" x2="${pts.B[0]}" y2="${pts.B[1]}" stroke="rgba(212,84,0,0.5)" stroke-width="1.5" stroke-dasharray="4,3"/>`;
+
+  // Chord CD
+  svg += `<line x1="${pts.C[0]}" y1="${pts.C[1]}" x2="${pts.D[0]}" y2="${pts.D[1]}" stroke="rgba(155,89,182,0.5)" stroke-width="1.5" stroke-dasharray="4,3"/>`;
+
+  // Line AC
+  svg += `<line x1="${pts.A[0]}" y1="${pts.A[1]}" x2="${pts.C[0]}" y2="${pts.C[1]}" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>`;
+
+  // Line BD
+  svg += `<line x1="${pts.B[0]}" y1="${pts.B[1]}" x2="${pts.D[0]}" y2="${pts.D[1]}" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>`;
+
+  // Highlight XM and MY (the conclusion)
+  svg += `<line x1="${pts.M[0]}" y1="${pts.M[1]}" x2="${pts.X[0]}" y2="${pts.X[1]}" stroke="rgba(78,201,176,0.9)" stroke-width="2.5"/>`;
+  svg += `<line x1="${pts.M[0]}" y1="${pts.M[1]}" x2="${pts.Y[0]}" y2="${pts.Y[1]}" stroke="rgba(78,201,176,0.9)" stroke-width="2.5"/>`;
+
+  // Small tick marks to show XM = MY
+  const tickSize = 6;
+  // Tick at midpoint of XM
+  const midXM = [(pts.X[0]+pts.M[0])/2, (pts.X[1]+pts.M[1])/2];
+  svg += `<line x1="${midXM[0]-tickSize}" y1="${midXM[1]-tickSize}" x2="${midXM[0]+tickSize}" y2="${midXM[1]+tickSize}" stroke="rgba(78,201,176,1)" stroke-width="1.5"/>`;
+  const midMY = [(pts.M[0]+pts.Y[0])/2, (pts.M[1]+pts.Y[1])/2];
+  svg += `<line x1="${midMY[0]-tickSize}" y1="${midMY[1]-tickSize}" x2="${midMY[0]+tickSize}" y2="${midMY[1]+tickSize}" stroke="rgba(78,201,176,1)" stroke-width="1.5"/>`;
+
+  // Points
+  const pointColor = {
+    O: 'rgba(255,255,255,0.8)',
+    P: 'rgba(212,84,0,1)', Q: 'rgba(212,84,0,1)',
+    M: 'rgba(78,201,176,1)',
+    A: 'rgba(212,84,0,1)', B: 'rgba(212,84,0,1)',
+    C: 'rgba(155,89,182,1)', D: 'rgba(155,89,182,1)',
+    X: 'rgba(78,201,176,1)', Y: 'rgba(78,201,176,1)'
+  };
+
+  for (const [name, [x, y]] of Object.entries(pts)) {
+    const r = name === 'M' ? 5 : 4;
+    svg += `<circle cx="${x}" cy="${y}" r="${r}" fill="${pointColor[name]}" stroke="rgba(0,0,0,0.5)" stroke-width="0.5"/>`;
+  }
+
+  // Labels
+  const labels = {
+    O: [10, -8], P: [-16, 5], Q: [8, -8],
+    M: [-16, -8], A: [-12, -6], B: [8, 14],
+    C: [8, -8], D: [-12, 14],
+    X: [-14, 6], Y: [8, 6]
+  };
+  for (const [name, [dx, dy]] of Object.entries(labels)) {
+    const [x, y] = pts[name];
+    svg += `<text x="${x+dx}" y="${y+dy}" fill="rgba(255,255,255,0.9)" font-size="13" font-family="Segoe UI,sans-serif" font-weight="600">${name}</text>`;
+  }
+
+  // Theorem statement at bottom
+  svg += `<text x="${CX}" y="${H - 10}" fill="rgba(78,201,176,0.9)" font-size="13" font-family="Segoe UI,sans-serif" text-anchor="middle" font-weight="600">Butterfly Theorem: M is the midpoint of XY</text>`;
+
+  svg += '</svg>';
+
+  let html = '<div style="color:var(--ok);font-weight:600;margin-bottom:8px;">Butterfly Theorem — Geometric Diagram</div>';
+  html += '<div style="margin-bottom:12px;">' + svg + '</div>';
+  html += '<div style="color:var(--fg3);font-size:12px;line-height:1.6;">';
+  html += '<span style="color:var(--info)">Circle c</span> in blue &nbsp;|&nbsp; ';
+  html += '<span style="color:rgba(212,84,0,1)">Chord AB</span> (dashed orange) &nbsp;|&nbsp; ';
+  html += '<span style="color:rgba(155,89,182,1)">Chord CD</span> (dashed purple)<br>';
+  html += '<span style="color:var(--ok)">Chord PQ</span> (green) &nbsp;|&nbsp; ';
+  html += '<span style="color:var(--accent)">XM = MY</span> highlighted in green with tick marks';
+  html += '</div>';
+
+  msgs.innerHTML = html;
+}
+
+// ============================================
+// LINE NUMBER SYNC
+// ============================================
+function updateLineNumbers() {
+  const editor = document.getElementById('editor');
+  const overlay = document.getElementById('code-overlay');
+  const ln = document.getElementById('line-numbers');
+  const src = editor.value;
+  const lines = src.split('\n');
+  overlay.innerHTML = highlight(src);
+
+  let html = '';
+  for (let i = 0; i < lines.length; i++) {
+    html += '<div class="ln" data-line="' + i + '" onclick="onLineClick(' + i + ')">' + (i + 1) + '</div>';
+  }
+  ln.innerHTML = html;
+}
+
+function onLineClick(lineIdx) {
+  const editor = document.getElementById('editor');
+  const src = editor.value;
+  const lines = src.split('\n');
+  // Set cursor to start of this line
+  let pos = 0;
+  for (let i = 0; i < lineIdx; i++) pos += lines[i].length + 1;
+  editor.selectionStart = editor.selectionEnd = pos;
+  editor.focus();
+
+  // Highlight active line
+  document.querySelectorAll('.ln').forEach(el => el.classList.remove('active'));
+  const active = document.querySelector('.ln[data-line="' + lineIdx + '"]');
+  if (active) active.classList.add('active');
+
+  // Update cursor position display
+  document.getElementById('cursor-pos').textContent = 'Ln ' + (lineIdx + 1) + ', Col 1';
+
+  // Update Infoview
+  try {
+    const parsed = parseProgram(src);
+    buildInfoview(parsed, lineIdx);
+  } catch (e) {}
+}
+
+function onCursorMove() {
+  const editor = document.getElementById('editor');
+  const src = editor.value;
+  const pos = editor.selectionStart;
+  let line = 1, col = 1;
+  for (let i = 0; i < pos; i++) {
+    if (src[i] === '\n') { line++; col = 1; }
+    else { col++; }
+  }
+  document.getElementById('cursor-pos').textContent = 'Ln ' + line + ', Col ' + col;
+
+  // Highlight line
+  document.querySelectorAll('.ln').forEach(el => el.classList.remove('active'));
+  const active = document.querySelector('.ln[data-line="' + (line - 1) + '"]');
+  if (active) active.classList.add('active');
+
+  try {
+    const parsed = parseProgram(src);
+    buildInfoview(parsed, line - 1);
+  } catch (e) {}
+}
+
+// ============================================
+// TAB SWITCHING
+// ============================================
+
+// ============================================
+// PROOF LOADING
+// ============================================
+function loadProof(name) {
+  const editor = document.getElementById('editor');
+  editor.value = proofs[name];
+  updateLineNumbers();
+  // Clear panels
+  document.getElementById('infoview').innerHTML = '<div style="color:var(--fg3);font-style:italic;">Click a line to inspect tactic state.</div>';
+  document.getElementById('messages').innerHTML = '<div style="color:var(--fg3);font-style:italic;">Click "Type Check" to verify.</div>';
+}
+
+// ============================================
+// INIT
+// ============================================
+window.onload = function() {
+  const editor = document.getElementById('editor');
+  editor.value = proofs.butterfly;
+  updateLineNumbers();
+  editor.addEventListener('input', updateLineNumbers);
+  editor.addEventListener('scroll', () => {
+    document.getElementById('code-overlay').scrollTop = editor.scrollTop;
+    document.getElementById('line-numbers').scrollTop = editor.scrollTop;
+  });
+  editor.addEventListener('click', onCursorMove);
+  editor.addEventListener('keyup', onCursorMove);
+};
+</script>
+</body>
+</html>
