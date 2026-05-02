@@ -1335,7 +1335,13 @@ function runCICTypeCheck(src) {
 
     // Step 3: Register type signatures in context
     for (const [name, sig] of Object.entries(parsed.typeSigs)) {
-      const ty = parseTypeExpr(sig.text);
+      let text = sig.text;
+      if (typeof text !== 'string') {
+        // Axiom types are stored as parsed objects, not strings
+        // Convert to string representation
+        text = text && text.tag === 'var' ? text.name : JSON.stringify(text);
+      }
+      const ty = parseTypeExpr(text);
       ctx.set(name, { type: ty, val: null, sort: inferSort(ty) });
     }
 
@@ -1354,10 +1360,12 @@ function runCICTypeCheck(src) {
 
     // Step 5: Check axioms
     for (const ax of parsed.axioms) {
-      const axSort = checkWellFormed(parseTypeExpr(ax.type), ctx);
-      steps.push({ ok: axSort.ok, text: '[CIC] Axiom "' + ax.name + '" : ' + ax.type + ' ... ' + (axSort.ok ? 'OK' : 'FAIL: ' + axSort.err) });
+      // Axiom types are parsed objects, convert to string for checking
+      const axTypeStr = typeof ax.type === 'string' ? ax.type : (ax.type && ax.type.tag === 'var' ? ax.type.name : JSON.stringify(ax.type));
+      const axSort = checkWellFormed(parseTypeExpr(axTypeStr), ctx);
+      steps.push({ ok: axSort.ok, text: '[CIC] Axiom "' + ax.name + '" : ' + axTypeStr + ' ... ' + (axSort.ok ? 'OK' : 'FAIL: ' + axSort.err) });
       if (axSort.ok) {
-        ctx.set(ax.name, { type: parseTypeExpr(ax.type), val: null, isAxiom: true });
+        ctx.set(ax.name, { type: parseTypeExpr(axTypeStr), val: null, isAxiom: true });
       }
     }
 
@@ -1499,7 +1507,9 @@ function checkInductiveWellFormed(ind, ctx) {
     if (!pwf.ok) return { ok: false, err: 'Param ' + p.name + ' ill-formed: ' + pwf.err };
   }
   for (const c of ind.constrs) {
-    const cwf = checkWellFormed(parseTypeExpr(c.type), ctx);
+    // Constructor types may be parsed objects, convert to string
+    const cTypeStr = typeof c.type === 'string' ? c.type : (c.type && c.type.tag === 'var' ? c.type.name : JSON.stringify(c.type));
+    const cwf = checkWellFormed(parseTypeExpr(cTypeStr), ctx);
     if (!cwf.ok) return { ok: false, err: 'Constr ' + c.name + ' ill-formed: ' + cwf.err };
   }
   let sort = ind.targetSort;
