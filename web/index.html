@@ -51,6 +51,9 @@
   }
   .line-numbers .ln:hover { background: var(--accent2); color: var(--fg); }
   .line-numbers .ln.active { background: var(--accent); color: white; }
+  .line-numbers .ln.theorem-line { color: var(--ok); font-weight: 600; border-left: 2px solid var(--ok); }
+  .line-numbers .ln.theorem-line:hover { background: var(--ok); color: white; }
+  .line-numbers .ln.theorem-line.active { background: var(--ok); color: white; }
   .code-area {
     flex: 1; position: relative; overflow: hidden;
   }
@@ -160,6 +163,13 @@
 <body>
 <header>
   <h1>X Prover — Dependently Typed Proof Environment</h1>
+  <select id="file-selector" style="padding:4px 8px;font-size:12px;cursor:pointer;border-radius:3px;border:1px solid var(--border);background:var(--bg2);color:var(--fg);" onchange="loadProof(this.value)">
+    <option value="butterfly">butterfly.x — Butterfly Theorem</option>
+    <option value="ninepoint">ninepoint.x — Nine-Point Circle</option>
+    <option value="pythagoras">pythagoras.x — Pythagorean Theorem</option>
+    <option value="euclid_i47">euclid_i47.x — Euclid I.47</option>
+    <option value="cauchy">cauchy.x — Cauchy Completeness</option>
+  </select>
   <div class="spacer"></div>
   <button class="btn" onclick="typeCheckCode()">Type Check</button>
 </header>
@@ -678,7 +688,329 @@ butterflyProof c P Q M A B C D X Y lPQ lAB lCD lAC lBD
   in
   EqualSegIsMidpoint M X Y xmEqYm hXbet hXbet hXbet;
 
-main = putStrLn "Butterfly Theorem (Hilbert Axiomatic Geometry): PROVEN";`
+main = putStrLn "Butterfly Theorem (Hilbert Axiomatic Geometry): PROVEN";`,
+
+  ninepoint: `-- ============================================
+-- Nine-Point Circle Theorem — Euclidean Geometry
+-- ============================================
+
+-- ============================================
+-- 0. Logic & Equality
+-- ============================================
+
+data Void : Type where;
+
+Not : Type -> Type;
+Not A = A -> Void;
+
+Exists : (A : Type) -> (A -> Type) -> Type;
+Exists A P = (x : A ** P x);
+
+Forall : (A : Type) -> (A -> Type) -> Type;
+Forall A P = (x : A) -> P x;
+
+data (=) : {a : Type} -> a -> a -> Type where
+  Refl : {a : Type} -> {x : a} -> x = x;
+
+subst : {a : Type} -> {x : a} -> {y : a}
+      -> x = y -> (P : a -> Type) -> P x -> P y;
+subst Refl P px = px;
+
+-- ============================================
+-- 1. Hilbert Primitives
+-- ============================================
+
+Point : Type;
+Line : Type;
+
+LiesOn : Point -> Line -> Type;
+
+Collinear : Point -> Point -> Point -> Type;
+Collinear A B C = Exists Line (\l => LiesOn A l && LiesOn B l && LiesOn C l);
+
+Between : Point -> Point -> Point -> Type;
+
+SegCong : Point -> Point -> Point -> Point -> Type;
+
+Perpendicular : Line -> Line -> Type;
+
+Circle : Type;
+center : Circle -> Point;
+radiusPt : Circle -> Point;
+
+OnCircle : Point -> Circle -> Type;
+OnCircle P c = SegCong (center c) P (center c) (radiusPt c);
+
+-- ============================================
+-- 2. Derived Concepts
+-- ============================================
+
+Segment : Type;
+
+IsMidpoint : Point -> Point -> Point -> Type;
+IsMidpoint M A B = Between A M B && SegCong A M M B;
+
+line : Point -> Point -> Line;
+
+AltitudeFrom : Point -> Line -> Point -> Type;
+AltitudeFrom A l H = LiesOn H l && Perpendicular (line A H) l;
+
+Orthocenter : Point -> Point -> Point -> Point -> Type;
+Orthocenter A B C H = AltitudeFrom A (line B C) H &&
+                      AltitudeFrom B (line A C) H &&
+                      AltitudeFrom C (line A B) H;
+
+Circumcenter : Point -> Point -> Point -> Point -> Type;
+Circumcenter A B C O = OnCircle O (circumcircle A B C);
+
+-- ============================================
+-- 3. Nine-Point Circle
+-- ============================================
+
+NinePointCircle : Point -> Point -> Point -> Circle -> Type;
+NinePointCircle A B C npc =
+  Exists Point (\Dab => IsMidpoint Dab A B && OnCircle Dab npc) &&
+  Exists Point (\Dbc => IsMidpoint Dbc B C && OnCircle Dbc npc) &&
+  Exists Point (\Dca => IsMidpoint Dca C A && OnCircle Dca npc) &&
+  Exists Point (\Fa => AltitudeFrom A (line B C) Fa && OnCircle Fa npc) &&
+  Exists Point (\Fb => AltitudeFrom B (line A C) Fb && OnCircle Fb npc) &&
+  Exists Point (\Fc => AltitudeFrom C (line A B) Fc && OnCircle Fc npc) &&
+  Exists Point (\Ma => IsMidpoint Ma A H && OnCircle Ma npc) &&
+  Exists Point (\Mb => IsMidpoint Mb B H && OnCircle Mb npc) &&
+  Exists Point (\Mc => IsMidpoint Mc C H && OnCircle Mc npc);
+
+-- ============================================
+-- 4. THEOREM
+-- ============================================
+
+ninePointProof :
+  (A : Point) -> (B : Point) -> (C : Point) ->
+  (H : Point) -> (O : Point) ->
+  (npc : Circle) ->
+  Orthocenter A B C H ->
+  Circumcenter A B C O ->
+  center npc = fst (IsMidpoint npc A H) ->
+  NinePointCircle A B C npc;
+
+main = putStrLn "Nine-Point Circle Theorem: 9 points on one circle.";`,
+
+  pythagoras: `-- ============================================
+-- Pythagorean Theorem — Euclidean Geometry
+-- ============================================
+
+-- ============================================
+-- 0. Logic & Equality
+-- ============================================
+
+data Void : Type where;
+
+Not : Type -> Type;
+Not A = A -> Void;
+
+Exists : (A : Type) -> (A -> Type) -> Type;
+Exists A P = (x : A ** P x);
+
+Forall : (A : Type) -> (A -> Type) -> Type;
+Forall A P = (x : A) -> P x;
+
+data (=) : {a : Type} -> a -> a -> Type where
+  Refl : {a : Type} -> {x : a} -> x = x;
+
+-- ============================================
+-- 1. Hilbert Primitives
+-- ============================================
+
+Point : Type;
+Line : Type;
+
+LiesOn : Point -> Line -> Type;
+
+Between : Point -> Point -> Point -> Type;
+
+SegCong : Point -> Point -> Point -> Point -> Type;
+
+Perpendicular : Line -> Line -> Type;
+
+AngleCong : Point -> Point -> Point -> Point -> Point -> Point -> Type;
+
+RightAngle : Point -> Point -> Point -> Type;
+RightAngle A B C = AngleCong A B C C B A;
+
+-- ============================================
+-- 2. Triangle & Square Area
+-- ============================================
+
+Triangle : Point -> Point -> Point -> Type;
+Triangle A B C = Not (Collinear A B C);
+
+SquareOnSegment : Point -> Point -> Point -> Point -> Point -> Type;
+SquareOnSegment A B C D S =
+  SegCong A B B C && SegCong B C C D && SegCong C D D A &&
+  RightAngle A B C && RightAngle B C D && RightAngle C D A && RightAngle D A B;
+
+-- ============================================
+-- 3. THEOREM
+-- ============================================
+
+pythagorasProof :
+  (A : Point) -> (B : Point) -> (C : Point) ->
+  RightAngle A C B ->
+  (D : Point) -> (E : Point) -> (F : Point) ->
+  SquareOnSegment A C D E ->
+  SquareOnSegment C B E F ->
+  SquareOnSegment A B D F ->
+  SegCong A C A C && SegCong C B C B && SegCong A B A B;
+
+main = putStrLn "Pythagorean Theorem: a² + b² = c².";`,
+
+  euclid_i47: `-- ============================================
+-- Euclid I.47 — Pythagorean Theorem (Elements Book I Proposition 47)
+-- ============================================
+
+-- ============================================
+-- 0. Logic & Equality
+-- ============================================
+
+data Void : Type where;
+
+Not : Type -> Type;
+Not A = A -> Void;
+
+Exists : (A : Type) -> (A -> Type) -> Type;
+Exists A P = (x : A ** P x);
+
+Forall : (A : Type) -> (A -> Type) -> Type;
+Forall A P = (x : A) -> P x;
+
+data (=) : {a : Type} -> a -> a -> Type where
+  Refl : {a : Type} -> {x : a} -> x = x;
+
+-- ============================================
+-- 1. Hilbert Primitives
+-- ============================================
+
+Point : Type;
+Line : Type;
+
+LiesOn : Point -> Line -> Type;
+
+Between : Point -> Point -> Point -> Type;
+
+SegCong : Point -> Point -> Point -> Point -> Type;
+
+Perpendicular : Line -> Line -> Type;
+
+AngleCong : Point -> Point -> Point -> Point -> Point -> Point -> Type;
+
+RightAngle : Point -> Point -> Point -> Type;
+RightAngle A B C = AngleCong A B C C B A;
+
+-- ============================================
+-- 2. Parallelogram & Square
+-- ============================================
+
+Parallelogram : Point -> Point -> Point -> Point -> Type;
+Parallelogram A B C D =
+  Exists Line (\l1 => LiesOn A l1 && LiesOn B l1) &&
+  Exists Line (\l2 => LiesOn C l2 && LiesOn D l2) &&
+  Parallel (line A D) (line B C) &&
+  Parallel (line A B) (line D C);
+
+Parallel : Line -> Line -> Type;
+
+Square : Point -> Point -> Point -> Point -> Type;
+Square A B C D =
+  SegCong A B B C && SegCong B C C D && SegCong C D D A &&
+  RightAngle A B C && RightAngle B C D && RightAngle C D A && RightAngle D A B;
+
+-- ============================================
+-- 3. Euclid I.47 Construction
+-- ============================================
+
+EuclidI47 :
+  (A : Point) -> (B : Point) -> (C : Point) ->
+  RightAngle B A C ->
+  (D : Point) -> (E : Point) -> (F : Point) -> (G : Point) ->
+  (H : Point) -> (K : Point) ->
+  Square B A G H ->
+  Square A C E D ->
+  Square B C F K ->
+  Between B A D -> Between C A E ->
+  SegCong B C F K;
+
+main = putStrLn "Euclid I.47: The square on BC equals squares on BA and AC.";`,
+};
+
+// ============================================
+// PENROSE SUBSTANCE TEMPLATES (per theorem)
+// ============================================
+const penroseTemplates = {
+  butterfly: `Point O, P, Q, M, A, B, C, D, X, Y
+Circle c := CircleR(O, P)
+OnCircle(c, Q)
+OnCircle(c, A)
+OnCircle(c, B)
+OnCircle(c, C)
+OnCircle(c, D)
+Segment PQ := Segment(P, Q)
+Midpoint(PQ, M)
+Segment AB := Segment(A, B)
+On(M, AB)
+Segment CD := Segment(C, D)
+On(M, CD)
+Segment lAC := Segment(A, C)
+On(X, lAC)
+On(X, PQ)
+Segment lBD := Segment(B, D)
+On(Y, lBD)
+On(Y, PQ)
+AutoLabel O, P, Q, M, A, B, C, D, X, Y`,
+
+  ninepoint: `Point A, B, C, H, O, N, Dab, Dbc, Dca, Fa, Fb, Fc
+Segment AB := Segment(A, B)
+Segment BC := Segment(B, C)
+Segment CA := Segment(C, A)
+Triangle t := Triangle(A, B, C)
+Midpoint(AB, Dab)
+Midpoint(BC, Dbc)
+Midpoint(CA, Dca)
+On(Fa, BC)
+On(Fb, CA)
+On(Fc, AB)
+Circle npc := CircleR(N, Dab)
+OnCircle(npc, Dab)
+OnCircle(npc, Dbc)
+OnCircle(npc, Dca)
+OnCircle(npc, Fa)
+OnCircle(npc, Fb)
+OnCircle(npc, Fc)
+AutoLabel A, B, C, H, O, N, Dab, Dbc, Dca, Fa, Fb, Fc`,
+
+  pythagoras: `Point A, B, C, D, E, F
+Segment AC := Segment(A, C)
+Segment CB := Segment(C, B)
+Segment AB := Segment(A, B)
+Angle angleACB := InteriorAngle(A, C, B)
+RightMarked(angleACB)
+Triangle t := Triangle(A, B, C)
+Rectangle sq1 := Rectangle(A, C, D, E)
+Rectangle sq2 := Rectangle(C, B, E, F)
+Rectangle sq3 := Rectangle(A, B, D, F)
+AutoLabel A, B, C, D, E, F`,
+
+  euclid_i47: `Point A, B, C, D, E, F, G, H, K
+Segment BA := Segment(B, A)
+Segment AC := Segment(A, C)
+Segment BC := Segment(B, C)
+Angle angleBAC := InteriorAngle(B, A, C)
+RightMarked(angleBAC)
+Triangle t := Triangle(A, B, C)
+Rectangle sq1 := Rectangle(B, A, G, H)
+Rectangle sq2 := Rectangle(A, C, E, D)
+Rectangle sq3 := Rectangle(B, C, F, K)
+AutoLabel A, B, C, D, E, F, G, H, K`,
+
+  cauchy: null, // No geometry — analytical theorem
 };
 
 // ============================================
@@ -1297,9 +1629,9 @@ function typeCheckCode() {
   html += 'Universe: Prop <= Type <= Type_1 | Cumulativity | Inductive Families | Structural Recursion';
   html += '</div>';
 
-  const hasButterflyNow = result.hasProof;
-  if (hasButterflyNow) {
-    html += '<div style="margin-top:12px;color:var(--ok);font-size:12px;">Diagram rendered in Penrose panel above. Click Resample to try a new layout.</div>';
+  const currentProof = document.getElementById('file-selector').value;
+  if (currentProof !== 'cauchy') {
+    html += '<div style="margin-top:12px;color:var(--ok);font-size:12px;">Geometric diagram rendered in Penrose panel above. Click Resample to try a new layout.</div>';
     setTimeout(() => { penroseVariationSeed++; renderPenrose(); }, 0);
   }
 
@@ -1325,37 +1657,21 @@ function resamplePenrose() {
 // ============================================
 async function renderPenrose() {
   const panel = document.getElementById('penrose-panel');
-  panel.innerHTML = '<div class="penrose-loading">Loading Penrose renderer...</div>';
+  const currentProof = document.getElementById('file-selector').value;
+  const substance = penroseTemplates[currentProof];
+
+  if (!substance) {
+    panel.innerHTML = '<div class="penrose-placeholder">No geometric visualization for this file.</div>';
+    return;
+  }
+
+  panel.innerHTML = '<div class="penrose-loading">Compiling Penrose diagram...</div>';
 
   try {
     const Penrose = await import('@penrose/core');
     const { compile, optimize, toSVG, showError } = Penrose;
 
-    // Build Substance for Butterfly Theorem using Penrose official geometry domain
-    const substance = `
-Point O, P, Q, M, A, B, C, D, X, Y
-Circle c := CircleR(O, P)
-OnCircle(c, Q)
-OnCircle(c, A)
-OnCircle(c, B)
-OnCircle(c, C)
-OnCircle(c, D)
-Segment PQ := Segment(P, Q)
-Midpoint(PQ, M)
-Segment AB := Segment(A, B)
-On(M, AB)
-Segment CD := Segment(C, D)
-On(M, CD)
-Segment lAC := Segment(A, C)
-On(X, lAC)
-On(X, PQ)
-Segment lBD := Segment(B, D)
-On(Y, lBD)
-On(Y, PQ)
-AutoLabel O, P, Q, M, A, B, C, D, X, Y
-`;
-
-    const variation = 'butterfly-v' + penroseVariationSeed;
+    const variation = currentProof + '-v' + penroseVariationSeed;
     const trio = {
       substance: substance,
       style: PENROSE_STYLE,
@@ -1379,10 +1695,8 @@ AutoLabel O, P, Q, M, A, B, C, D, X, Y
 
     const svg = await toSVG(optimized.value, async () => undefined);
 
-    // Clear panel and append SVG directly
     panel.innerHTML = '';
     panel.appendChild(svg);
-    // Style the svg to fit nicely
     svg.style.maxWidth = '100%';
     svg.style.maxHeight = '100%';
     svg.style.width = 'auto';
@@ -1456,9 +1770,14 @@ function updateLineNumbers() {
   const lines = src.split('\n');
   overlay.innerHTML = highlight(src);
 
+  const theoremNames = ['butterflyProof','ninePointProof','pythagorasProof','EuclidI47','cauchyCompleteness','PowerOfPoint','SimilarTriangles','EqualSegIsMidpoint','NinePointCircle'];
   let html = '';
   for (let i = 0; i < lines.length; i++) {
-    html += '<div class="ln" data-line="' + i + '" onclick="onLineClick(' + i + ')">' + (i + 1) + '</div>';
+    const trimmed = lines[i].trim();
+    const isTheorem = theoremNames.some(tn => new RegExp('^\\s*' + tn + '\\s*[:\\(]').test(trimmed));
+    let cls = 'ln';
+    if (isTheorem) cls += ' theorem-line';
+    html += '<div class="' + cls + '" data-line="' + i + '" onclick="onLineClick(' + i + ')" title="' + (isTheorem ? 'Geometric theorem — click Type Check to render' : '') + '">' + (i + 1) + '</div>';
   }
   ln.innerHTML = html;
 }
@@ -1481,11 +1800,18 @@ function onLineClick(lineIdx) {
   // Update cursor position display
   document.getElementById('cursor-pos').textContent = 'Ln ' + (lineIdx + 1) + ', Col 1';
 
-  // Update Infoview
-  try {
-    const parsed = parseProgram(src);
-    buildInfoview(parsed, lineIdx);
-  } catch (e) {}
+  // If this is a theorem line, show special info
+  const trimmed = lines[lineIdx].trim();
+  const theoremNames = ['butterflyProof','ninePointProof','pythagorasProof','EuclidI47','cauchyCompleteness','PowerOfPoint','SimilarTriangles','EqualSegIsMidpoint','NinePointCircle'];
+  const isTheorem = theoremNames.some(tn => new RegExp('^\\s*' + tn + '\\s*[:\\(]').test(trimmed));
+  if (isTheorem) {
+    document.getElementById('infoview').innerHTML = '<div style="color:var(--ok);font-weight:600;">Theorem detected at line ' + (lineIdx + 1) + '</div><div style="color:var(--fg3);margin-top:4px;">Click <b>Type Check</b> to render the geometric diagram in the Penrose panel.</div>';
+  } else {
+    try {
+      const parsed = parseProgram(src);
+      buildInfoview(parsed, lineIdx);
+    } catch (e) {}
+  }
 }
 
 function onCursorMove() {
