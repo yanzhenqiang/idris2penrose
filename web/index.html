@@ -808,6 +808,13 @@ function parseProgram(src) {
   function parseInductiveDecl() {
     next(); // 'data'
     let name = next();
+    // Handle parenthesized names like data (=) or data (+)
+    if (name === '(') {
+      let inner = '';
+      while (peek() && peek() !== ')') { inner += next(); }
+      expect(')');
+      name = '(' + inner + ')';
+    }
     let params = [];
     // Parse optional parameters: (a : Type) or {a : Type}
     while (peek() === '(' || peek() === '{') {
@@ -827,17 +834,36 @@ function parseProgram(src) {
       else if (peek() === 'Prop') { next(); targetSort = 'Prop'; }
       else { targetSort = parseExpr(); }
     }
-    expect('where');
-    expect('{');
+    // Accept both 'where' and '=' for constructor introduction
+    let hasWhere = false;
+    if (peek() === 'where') { next(); hasWhere = true; }
+    else if (peek() === '=') { next(); hasWhere = true; }
+    
+    // Check for { ... } block (new syntax) or inline constructors (old syntax)
     let constrs = [];
-    while (peek() && peek() !== '}') {
-      let cName = next();
-      expect(':');
-      let cType = parseExpr();
-      constrs.push({ name: cName, type: cType });
-      if (peek() === '|') next();
+    if (peek() === '{') {
+      next(); // '{'
+      while (peek() && peek() !== '}') {
+        let cName = next();
+        expect(':');
+        let cType = parseExpr();
+        constrs.push({ name: cName, type: cType });
+        if (peek() === '|') next();
+      }
+      expect('}');
+    } else if (hasWhere) {
+      // Old syntax: data T where; (no constructors) or data T = C1 | C2;
+      while (peek() && peek() !== ';') {
+        let cName = next();
+        let cType = name; // default type is just the type name
+        if (peek() === ':') { next(); cType = parseExpr(); }
+        constrs.push({ name: cName, type: cType });
+        if (peek() === '|') next();
+      }
+    } else {
+      // No constructor block - just semicolon
     }
-    expect('}');
+    
     if (peek() === ';') next();
     return { name, params, indices: [], targetSort, constrs };
   }
@@ -853,9 +879,9 @@ function parseProgram(src) {
 
   function parseExpr() {
     let lhs = parseAtom();
-    while (peek() && peek() !== ';' && peek() !== ')' && peek() !== '}' && peek() !== '|' && peek() !== 'in' && peek() !== 'of' && peek() !== '=>' && peek() !== 'then' && peek() !== 'else') {
-      if (peek() === '->' || peek() === '=>') break;
+    while (peek() && peek() !== ';' && peek() !== ')' && peek() !== '}' && peek() !== '|' && peek() !== 'in' && peek() !== 'of' && peek() !== '=>' && peek() !== 'then' && peek() !== 'else' && peek() !== ',') {
       if (peek() === 'case' || peek() === 'let' || peek() === 'if' || peek() === 'do') break;
+      if (peek() === '->') { next(); lhs = { tag: 'pi', var: '_', ty: lhs, body: parseAtom() }; continue; }
       lhs = { tag: 'app', f: lhs, x: parseAtom() };
     }
     return lhs;
@@ -984,7 +1010,7 @@ function runCICTypeCheck(src) {
     // Step 4: Check inductive declarations (CIC universe constraints)
     for (const ind of parsed.datas) {
       const indSort = checkInductiveWellFormed(ind, ctx);
-      steps.push({ ok: indSort.ok, text: '[CIC] Inductive "' + ind.name + '" (' + ind.params.length + ' params, ' + ind.constrs.length + ' constrs) sort=' + indSort.sort + ' ... ' + (indSort.ok ? 'OK' : 'FAIL: ' + indSort.err) });
+      steps.push({ ok: indSort.ok, text: '[CIC] Inductive "' + ind.name + '" (' + ind.params.length + ' params, ' + ind.constrs.length + ' constrs) sort=' + (typeof indSort.sort === 'string' ? indSort.sort : 'Type') + ' ... ' + (indSort.ok ? 'OK' : 'FAIL: ' + indSort.err) });
       if (indSort.ok) {
         ctx.set(ind.name, { type: { tag: 'sort', s: indSort.sort }, val: null });
         // Register constructors
